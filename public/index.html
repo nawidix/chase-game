@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>بازی تعقیب و سیلی</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  @import url('https://cdn.jsdelivr.net/npm/vazirmatn@33.0.3/Vazirmatn-font-face.css');
+
+  :root {
+    --bg-deep: #1b0f2e;
+    --bg-mid: #2d1854;
+    --accent-man: #ff8a5c;
+    --accent-woman: #ffd23f;
+    --accent-good: #3ddc97;
+    --accent-bad: #ff5c72;
+    --card: #241640;
+    --text: #f3edff;
+    --text-dim: #b6a8d9;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: 'Vazirmatn', Tahoma, sans-serif;
+    background: radial-gradient(circle at 50% -10%, var(--bg-mid), var(--bg-deep) 65%);
+    color: var(--text);
+    user-select: none;
+  }
+
+  #app { position: relative; width: 100%; height: 100vh; overflow: hidden; }
+
+  .screen {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 24px; text-align: center;
+  }
+
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: var(--text-dim); margin: 0; font-size: 14px; }
+
+  input[type=text] {
+    width: 220px; padding: 12px 14px; border-radius: 16px; border: none;
+    background: var(--card); color: var(--text); font-family: inherit; font-size: 16px;
+    text-align: center; outline: 2px solid transparent;
+  }
+  input[type=text]:focus { outline-color: var(--accent-woman); }
+
+  button {
+    font-family: inherit; font-size: 16px; font-weight: 700;
+    padding: 14px 28px; border-radius: 18px; border: none;
+    background: linear-gradient(135deg, var(--accent-man), var(--accent-woman));
+    color: #1b0f2e; cursor: pointer;
+  }
+  button:active { transform: scale(0.96); }
+  button.secondary {
+    background: var(--card); color: var(--text); border: 1px solid #4a3676;
+  }
+  button:disabled { opacity: 0.5; }
+
+  .code-box {
+    font-size: 32px; letter-spacing: 6px; font-weight: 800;
+    background: var(--card); padding: 14px 24px; border-radius: 16px;
+    border: 2px dashed var(--accent-woman);
+  }
+
+  .char-grid { display: flex; gap: 18px; }
+  .char-card {
+    width: 130px; padding: 16px 10px 18px; border-radius: 24px;
+    background: var(--card); border: 2px solid transparent; cursor: pointer;
+  }
+  .char-card.selected { border-color: var(--accent-woman); }
+  .char-card .avatar-wrap { height: 110px; display: flex; align-items: flex-end; justify-content: center; }
+  .char-card .label { margin-top: 10px; font-size: 14px; font-weight: 700; }
+
+  /* ---- Avatars, drawn with CSS (no image files needed) ---- */
+  .avatar { position: relative; width: 64px; height: 100px; }
+  .avatar .head {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 40px; height: 40px; border-radius: 50%; background: #f0c199;
+  }
+  .avatar .body {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 54px; height: 46px; border-radius: 20px 20px 0 0;
+  }
+  .avatar.man .body { background: var(--accent-man); }
+  .avatar.woman .body { background: var(--accent-woman); }
+  .avatar.man .hair {
+    position: absolute; top: -3px; left: 50%; transform: translateX(-50%);
+    width: 42px; height: 20px; border-radius: 20px 20px 0 0; background: #3c2a1e;
+  }
+  .avatar.man .beard {
+    position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+    width: 34px; height: 20px; border-radius: 0 0 16px 16px; background: #3c2a1e;
+  }
+  .avatar.man .mustache {
+    position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+    width: 22px; height: 6px; border-radius: 4px; background: #3c2a1e;
+  }
+  .avatar.woman .hair {
+    position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
+    width: 48px; height: 92px; border-radius: 24px 24px 30px 30px; background: #2b1a12; z-index: -1;
+  }
+  .avatar.woman .headtop {
+    position: absolute; top: -2px; left: 50%; transform: translateX(-50%);
+    width: 44px; height: 22px; border-radius: 22px 22px 0 0; background: #2b1a12;
+  }
+
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0; display: flex;
+    justify-content: space-between; align-items: center; padding: 10px 16px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.45), transparent);
+    font-weight: 700; font-size: 15px; z-index: 5;
+  }
+  #hud .score.me { color: var(--accent-good); }
+  #hud .score.opp { color: var(--accent-bad); }
+  #timer { font-size: 20px; }
+
+  #arena-field {
+    position: absolute; inset: 0; background:
+      repeating-linear-gradient(0deg, #251742, #251742 40px, #2b1b4c 40px, #2b1b4c 41px),
+      repeating-linear-gradient(90deg, #251742, #251742 40px, #2b1b4c 40px, #2b1b4c 41px);
+  }
+  .player-token { position: absolute; width: 64px; height: 100px; transform: translate(-50%, -100%); transition: filter 0.2s; }
+  .player-token.flash { filter: brightness(2) drop-shadow(0 0 12px #fff); }
+  .player-token .name-tag {
+    position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+  }
+
+  #catch-btn {
+    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+    background: var(--accent-bad); color: #fff; font-size: 18px; padding: 16px 34px;
+    border-radius: 30px; box-shadow: 0 0 24px rgba(255,92,114,0.7); z-index: 6;
+  }
+
+  #rps-overlay {
+    position: absolute; inset: 0; background: rgba(10, 4, 22, 0.92);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; z-index: 20;
+  }
+  #rps-timer-bar { width: 220px; height: 8px; background: var(--card); border-radius: 4px; overflow: hidden; }
+  #rps-timer-fill { height: 100%; background: var(--accent-woman); width: 100%; }
+  .rps-options { display: flex; gap: 14px; }
+  .rps-btn { font-size: 34px; width: 74px; height: 74px; border-radius: 50%; padding: 0; }
+  .rps-btn.chosen { outline: 3px solid var(--accent-good); }
+
+  #toast {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 22px; font-weight: 800; padding: 18px 30px; border-radius: 20px;
+    background: rgba(0,0,0,0.75); opacity: 0; pointer-events: none; z-index: 30;
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, -60%); }
+
+  table.results { border-collapse: collapse; width: 260px; }
+  table.results td { padding: 10px; background: var(--card); font-size: 15px; }
+  table.results tr:first-child td { border-radius: 12px 12px 0 0; }
+  table.results tr:last-child td { border-radius: 0 0 12px 12px; }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 0: connecting -->
+  <div id="screen-connect" class="screen">
+    <h1>در حال اتصال…</h1>
+    <p class="sub">یک لحظه صبر کن</p>
+  </div>
+
+  <!-- 1: enter name -->
+  <div id="screen-name" class="screen" hidden>
+    <h1>اسمت چیه؟</h1>
+    <input id="name-input" type="text" maxlength="14" placeholder="مثلاً: علی" />
+    <button id="name-continue">ادامه</button>
+  </div>
+
+  <!-- 2: lobby: create or join -->
+  <div id="screen-lobby" class="screen" hidden>
+    <h1>یه بازی بساز یا وارد بشو</h1>
+    <button id="btn-create">ساخت اتاق جدید</button>
+    <p class="sub">— یا —</p>
+    <input id="join-code-input" type="text" maxlength="4" placeholder="کد اتاق دوستت" style="text-transform:uppercase" />
+    <button id="btn-join" class="secondary">ورود به اتاق</button>
+    <button id="btn-leaderboard" class="secondary" style="margin-top:10px;">🏆 امتیازات اخیر</button>
+  </div>
+
+  <!-- 3: waiting for friend to join -->
+  <div id="screen-waiting-join" class="screen" hidden>
+    <h1>منتظر دوستت هستیم…</h1>
+    <p class="sub">این کد یا لینک رو براش بفرست</p>
+    <div class="code-box" id="room-code-display">----</div>
+    <button id="btn-share">ارسال دعوت در تلگرام</button>
+  </div>
+
+  <!-- 4: character select -->
+  <div id="screen-select" class="screen" hidden>
+    <h1>کاراکترت رو انتخاب کن</h1>
+    <div class="char-grid">
+      <div class="char-card" data-char="man">
+        <div class="avatar-wrap">
+          <div class="avatar man">
+            <div class="hair"></div>
+            <div class="head"></div>
+            <div class="mustache"></div>
+            <div class="beard"></div>
+            <div class="body"></div>
+          </div>
+        </div>
+        <div class="label">مرد جوان</div>
+      </div>
+      <div class="char-card" data-char="woman">
+        <div class="avatar-wrap">
+          <div class="avatar woman">
+            <div class="hair"></div>
+            <div class="headtop"></div>
+            <div class="head"></div>
+            <div class="body"></div>
+          </div>
+        </div>
+        <div class="label">زن جوان</div>
+      </div>
+    </div>
+    <p class="sub" id="select-status"></p>
+  </div>
+
+  <!-- 5: arena -->
+  <div id="screen-arena" class="screen" hidden style="padding:0; justify-content:flex-start;">
+    <div id="hud">
+      <div class="score me" id="hud-my-score">شما: 0</div>
+      <div id="timer">۹۰</div>
+      <div class="score opp" id="hud-opp-score">حریف: 0</div>
+    </div>
+    <div id="arena-field">
+      <div class="player-token" id="me-token"></div>
+      <div class="player-token" id="opp-token"></div>
+    </div>
+    <button id="catch-btn" hidden>👋 بگیرش!</button>
+  </div>
+
+  <!-- 6: RPS duel overlay -->
+  <div id="rps-overlay" hidden>
+    <h1 id="rps-title">دوئل!</h1>
+    <div id="rps-timer-bar"><div id="rps-timer-fill"></div></div>
+    <div class="rps-options">
+      <button class="rps-btn" data-choice="rock">🪨</button>
+      <button class="rps-btn" data-choice="paper">📄</button>
+      <button class="rps-btn" data-choice="scissors">✂️</button>
+    </div>
+    <p class="sub" id="rps-status">یکی رو انتخاب کن</p>
+  </div>
+
+  <!-- 7: stage end -->
+  <div id="screen-end" class="screen" hidden>
+    <h1>پایان مرحله ۱</h1>
+    <table class="results" id="results-table"></table>
+    <p class="sub">مراحل بعدی (معدن طلا، مسابقه، دنیای رویایی) به‌زودی اضافه می‌شن</p>
+    <button id="btn-restart">اتاق جدید</button>
+  </div>
+
+  <!-- 8: leaderboard -->
+  <div id="screen-leaderboard" class="screen" hidden>
+    <h1>🏆 آخرین نتیجه‌ها</h1>
+    <div id="leaderboard-list" style="max-height:50vh; overflow-y:auto; width:100%; max-width:300px;"></div>
+    <button id="btn-leaderboard-back" class="secondary">بازگشت</button>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ⚠️ TODO: replace with your real bot username (without @) after you create
+  // it with @BotFather, so the invite link opens your Mini App directly.
+  const BOT_USERNAME = 'playsomegamesbot';
+
+  const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+  if (tg) { tg.ready(); tg.expand(); }
+
+  function haptic(type) {
+    if (!tg || !tg.HapticFeedback) return;
+    if (type === 'light' || type === 'medium' || type === 'heavy') tg.HapticFeedback.impactOccurred(type);
+    else if (type === 'success' || type === 'error' || type === 'warning') tg.HapticFeedback.notificationOccurred(type);
+  }
+
+  const socket = io(); // same-origin: server also serves this page
+
+  const screens = {};
+  document.querySelectorAll('.screen, #rps-overlay').forEach((el) => (screens[el.id] = el));
+  function show(id) {
+    Object.values(screens).forEach((el) => (el.hidden = true));
+    screens[id].hidden = false;
+  }
+
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+  function toast(text, ms) {
+    toastEl.textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms || 1800);
+  }
+
+  // ---------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------
+  let myName = '';
+  let myId = null;
+  let roomCode = null;
+  let myChar = null;
+  let myPos = { x: 50, y: 50 };     // percentage coordinates (0-100) inside the field
+  let oppPos = { x: 50, y: 50 };
+  let moving = false;
+  let moveTarget = null;
+  const MOVE_SPEED = 26; // % of field per second
+
+  // ---------------------------------------------------------------------
+  // 0/1: connect + name
+  // ---------------------------------------------------------------------
+  socket.on('connect', () => {
+    myId = socket.id;
+    show('screen-name');
+  });
+
+  document.getElementById('name-continue').addEventListener('click', () => {
+    const val = document.getElementById('name-input').value.trim();
+    myName = val || 'بازیکن';
+    // Telegram deep-link auto-join: /startapp=<code>
+    const startParam = tg && tg.initDataUnsafe ? tg.initDataUnsafe.start_param : null;
+    if (startParam) {
+      roomCode = startParam.toUpperCase();
+      socket.emit('join_room', { code: roomCode, name: myName });
+      show('screen-waiting-join');
+      document.getElementById('room-code-display').textContent = roomCode;
+      document.getElementById('btn-share').hidden = true;
+    } else {
+      show('screen-lobby');
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // 2/3: lobby
+  // ---------------------------------------------------------------------
+  document.getElementById('btn-create').addEventListener('click', () => {
+    socket.emit('create_room', { name: myName });
+  });
+
+  document.getElementById('btn-join').addEventListener('click', () => {
+    const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+    if (!code) return;
+    roomCode = code;
+    socket.emit('join_room', { code, name: myName });
+  });
+
+  document.getElementById('btn-leaderboard').addEventListener('click', () => {
+    socket.emit('get_leaderboard');
+    show('screen-leaderboard');
+  });
+  document.getElementById('btn-leaderboard-back').addEventListener('click', () => show('screen-lobby'));
+
+  socket.on('room_created', ({ code }) => {
+    roomCode = code;
+    document.getElementById('room-code-display').textContent = code;
+    document.getElementById('btn-share').hidden = false;
+    show('screen-waiting-join');
+  });
+
+  document.getElementById('btn-share').addEventListener('click', () => {
+    const link = `https://t.me/${BOT_USERNAME}?startapp=${roomCode}`;
+    const text = encodeURIComponent(`بیا با هم بازی کنیم! کد اتاق: ${roomCode}`);
+    if (tg && tg.openTelegramLink) {
+      tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${text}`);
+    } else {
+      navigator.clipboard && navigator.clipboard.writeText(link);
+      toast('لینک کپی شد');
+    }
+  });
+
+  socket.on('error_msg', ({ message }) => toast(message, 2200));
+
+  // ---------------------------------------------------------------------
+  // 4: character select
+  // ---------------------------------------------------------------------
+  socket.on('room_ready', () => {
+    show('screen-select');
+  });
+
+  document.querySelectorAll('.char-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      document.querySelectorAll('.char-card').forEach((c) => c.classList.remove('selected'));
+      card.classList.add('selected');
+      myChar = card.dataset.char;
+      socket.emit('select_character', { character: myChar });
+      document.getElementById('select-status').textContent = 'منتظر انتخاب حریف…';
+      haptic('light');
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // 5: arena
+  // ---------------------------------------------------------------------
+  const meTokenEl = document.getElementById('me-token');
+  const oppTokenEl = document.getElementById('opp-token');
+  const fieldEl = document.getElementById('arena-field');
+  const catchBtn = document.getElementById('catch-btn');
+  let oppCharacter = 'man';
+
+  function avatarHTML(character, name) {
+    if (character === 'woman') {
+      return `<div class="name-tag">${name}</div>
+        <div class="avatar woman"><div class="hair"></div><div class="headtop"></div><div class="head"></div><div class="body"></div></div>`;
+    }
+    return `<div class="name-tag">${name}</div>
+      <div class="avatar man"><div class="hair"></div><div class="head"></div><div class="mustache"></div><div class="beard"></div><div class="body"></div></div>`;
+  }
+
+  function placeToken(el, pos) {
+    el.style.left = pos.x + '%';
+    el.style.top = pos.y + '%';
+  }
+
+  socket.on('start_game', ({ characters, names }) => {
+    myChar = characters[myId];
+    const oppId = Object.keys(characters).find((id) => id !== myId);
+    oppCharacter = characters[oppId] || 'man';
+
+    meTokenEl.innerHTML = avatarHTML(myChar, myName);
+    oppTokenEl.innerHTML = avatarHTML(oppCharacter, names[oppId] || 'حریف');
+
+    myPos = { x: 30, y: 70 };
+    oppPos = { x: 70, y: 30 };
+    placeToken(meTokenEl, myPos);
+    placeToken(oppTokenEl, oppPos);
+
+    show('screen-arena');
+    requestAnimationFrame(gameLoop);
+  });
+
+  // Tap-to-move: tap anywhere in the field and the character walks there
+  fieldEl.addEventListener('pointerdown', (e) => {
+    const rect = fieldEl.getBoundingClientRect();
+    moveTarget = {
+      x: ((e.clientX - rect.left) / rect.width) * 100,
+      y: ((e.clientY - rect.top) / rect.height) * 100
+    };
+  });
+
+  let lastFrame = performance.now();
+  let lastSent = 0;
+  function gameLoop(now) {
+    if (screens['screen-arena'].hidden) return;
+    const dt = (now - lastFrame) / 1000;
+    lastFrame = now;
+
+    if (moveTarget) {
+      const dx = moveTarget.x - myPos.x;
+      const dy = moveTarget.y - myPos.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 1) {
+        moveTarget = null;
+      } else {
+        const step = Math.min(dist, MOVE_SPEED * dt);
+        myPos.x = Math.max(4, Math.min(96, myPos.x + (dx / dist) * step));
+        myPos.y = Math.max(8, Math.min(96, myPos.y + (dy / dist) * step));
+        placeToken(meTokenEl, myPos);
+      }
+    }
+
+    if (now - lastSent > 90) {
+      socket.emit('move', myPos);
+      lastSent = now;
+    }
+
+    const dist = Math.hypot(myPos.x - oppPos.x, myPos.y - oppPos.y);
+    catchBtn.hidden = dist > 14 || duelActive;
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  socket.on('opponent_move', (pos) => {
+    oppPos = pos;
+    placeToken(oppTokenEl, oppPos);
+  });
+
+  catchBtn.addEventListener('click', () => {
+    socket.emit('catch_attempt');
+    haptic('medium');
+  });
+
+  socket.on('time_update', ({ timeLeft, scores }) => {
+    document.getElementById('timer').textContent = timeLeft;
+    document.getElementById('hud-my-score').textContent = 'شما: ' + (scores[myId] || 0);
+    const oppId = Object.keys(scores).find((id) => id !== myId);
+    document.getElementById('hud-opp-score').textContent = 'حریف: ' + (scores[oppId] || 0);
+  });
+
+  // ---------------------------------------------------------------------
+  // 6: RPS duel
+  // ---------------------------------------------------------------------
+  let duelActive = false;
+  let rpsTimerInterval = null;
+
+  socket.on('duel_start', ({ catcher, target, timeMs }) => {
+    duelActive = true;
+    catchBtn.hidden = true;
+    show('rps-overlay');
+    document.getElementById('rps-title').textContent = catcher === myId ? 'گرفتیش! انتخاب کن' : 'داری فرار می‌کنی! انتخاب کن';
+    document.getElementById('rps-status').textContent = 'یکی رو انتخاب کن';
+    document.querySelectorAll('.rps-btn').forEach((b) => b.classList.remove('chosen'));
+
+    const fill = document.getElementById('rps-timer-fill');
+    fill.style.transition = 'none';
+    fill.style.width = '100%';
+    requestAnimationFrame(() => {
+      fill.style.transition = `width ${timeMs}ms linear`;
+      fill.style.width = '0%';
+    });
+  });
+
+  document.querySelectorAll('.rps-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.rps-btn').forEach((b) => b.classList.remove('chosen'));
+      btn.classList.add('chosen');
+      socket.emit('rps_choice', { choice: btn.dataset.choice });
+      document.getElementById('rps-status').textContent = 'منتظر حریف…';
+      haptic('light');
+    });
+  });
+
+  socket.on('duel_tie_retry', () => {
+    document.getElementById('rps-status').textContent = 'مساوی شد! دوباره امتحان کن';
+    document.querySelectorAll('.rps-btn').forEach((b) => b.classList.remove('chosen'));
+  });
+
+  socket.on('duel_result', ({ result, catcher, target, scores }) => {
+    duelActive = false;
+    show('screen-arena');
+
+    const iAmTarget = target === myId;
+    const iAmCatcher = catcher === myId;
+
+    if (result === 'tie') {
+      toast('نتیجه: بی‌نتیجه، به تعقیب ادامه بدید!', 2200);
+    } else if (result === 'catcher') {
+      if (iAmCatcher) toast('زدی! 👋 ۵۰- امتیاز برای حریف', 2200);
+      else if (iAmTarget) toast('سیلی خوردی! 😖 ۵۰- امتیاز', 2200);
+      haptic(iAmTarget ? 'error' : 'success');
+    } else if (result === 'target') {
+      if (iAmTarget) toast('فرار کردی! 🏃 ۳۰+ امتیاز', 2200);
+      else if (iAmCatcher) toast('فرار کرد ازت! 😅', 2200);
+      haptic(iAmTarget ? 'success' : 'warning');
+    }
+
+    document.getElementById('hud-my-score').textContent = 'شما: ' + (scores[myId] || 0);
+    const oppId = Object.keys(scores).find((id) => id !== myId);
+    document.getElementById('hud-opp-score').textContent = 'حریف: ' + (scores[oppId] || 0);
+
+    const flashEl = iAmTarget ? meTokenEl : (iAmCatcher ? oppTokenEl : null);
+    if (flashEl) {
+      flashEl.classList.add('flash');
+      setTimeout(() => flashEl.classList.remove('flash'), 400);
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // 7: stage end
+  // ---------------------------------------------------------------------
+  socket.on('stage_end', ({ scores, names }) => {
+    const ids = Object.keys(scores);
+    const rows = ids
+      .sort((a, b) => scores[b] - scores[a])
+      .map((id, i) => {
+        const isMe = id === myId;
+        const crown = i === 0 ? '🏆 ' : '';
+        return `<tr><td>${crown}${names[id]}${isMe ? ' (شما)' : ''}</td><td>${scores[id]}</td></tr>`;
+      })
+      .join('');
+    document.getElementById('results-table').innerHTML = rows;
+    show('screen-end');
+  });
+
+  document.getElementById('btn-restart').addEventListener('click', () => window.location.reload());
+
+  socket.on('opponent_left', () => {
+    toast('حریف از بازی خارج شد', 2500);
+    setTimeout(() => window.location.reload(), 2000);
+  });
+
+  // ---------------------------------------------------------------------
+  // 8: leaderboard
+  // ---------------------------------------------------------------------
+  socket.on('leaderboard', (list) => {
+    const el = document.getElementById('leaderboard-list');
+    if (!list.length) {
+      el.innerHTML = '<p class="sub">هنوز بازی‌ای تموم نشده</p>';
+      return;
+    }
+    el.innerHTML = list
+      .map(
+        (m) => `<div style="background:var(--card);border-radius:12px;padding:10px 14px;margin-bottom:8px;text-align:right;">
+          <b>${m.p1Name}</b>: ${m.p1Score} &nbsp;|&nbsp; <b>${m.p2Name}</b>: ${m.p2Score}
+        </div>`
+      )
+      .join('');
+  });
+})();
+</script>
+</body>
+</html>

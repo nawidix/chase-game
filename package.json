@@ -1,0 +1,13 @@
+{
+  "name": "chase-game-server",
+  "version": "1.0.0",
+  "description": "Stage 1 (Chase + Slap Duel) server for the Telegram two-player party game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
