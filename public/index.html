@@ -160,6 +160,55 @@
   table.results tr:first-child td { border-radius: 12px 12px 0 0; }
   table.results tr:last-child td { border-radius: 0 0 12px 12px; }
 
+  /* ---- Stage 2: gold mining grid ---- */
+  #stage2-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+    width: 100%; max-width: 340px; margin-top: 10px;
+  }
+  .tile {
+    aspect-ratio: 1; border-radius: 10px; background: linear-gradient(145deg, #5a3a24, #3d2718);
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.3);
+  }
+  .tile.dug { background: #241640; box-shadow: none; }
+  .tile.dug.pop { animation: pop 0.3s ease; }
+  @keyframes pop { 0% { transform: scale(0.5); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+  /* ---- Stage 3: racing ---- */
+  #stage3-track {
+    position: absolute; inset: 0; top: 46px; overflow: hidden;
+    background: linear-gradient(#3a2a5c, #241640);
+  }
+  .s3-lane-line { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.15); }
+  #s3-finish-line {
+    position: absolute; left: 0; right: 0; height: 10px;
+    background: repeating-linear-gradient(90deg, #fff 0 10px, #241640 10px 20px);
+  }
+  .s3-car { position: absolute; font-size: 34px; transform: translate(-50%, -50%); transition: left 0.15s; }
+  .s3-car.opp { opacity: 0.85; filter: hue-rotate(160deg); }
+  #s3-controls {
+    position: absolute; bottom: 18px; left: 0; right: 0; display: flex;
+    justify-content: space-between; padding: 0 20px; z-index: 5;
+  }
+  #s3-controls button { font-size: 26px; width: 58px; height: 58px; border-radius: 50%; padding: 0; }
+  #s3-bump { background: var(--accent-bad); color: #fff; width: auto !important; border-radius: 26px; padding: 0 16px !important; font-size: 15px; }
+
+  /* ---- Stage 4: dreamland climb ---- */
+  #stage4-sky {
+    position: absolute; inset: 0; top: 46px; overflow: hidden;
+    background: linear-gradient(#ffd6f0, #d9c8ff 55%, #c9f7ff);
+  }
+  .s4-lane-line { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.4); }
+  #s4-bubble { position: absolute; font-size: 40px; left: 50%; bottom: 18%; transform: translate(-50%, 50%); transition: left 0.15s; }
+  .s4-hazard { position: absolute; font-size: 30px; transform: translate(-50%, -50%); }
+  .s4-gem { position: absolute; font-size: 26px; transform: translate(-50%, -50%); }
+  .s4-row-label { position: absolute; right: 8px; font-size: 10px; color: rgba(0,0,0,0.35); transform: translateY(-50%); }
+  #s4-controls {
+    position: absolute; bottom: 18px; left: 0; right: 0; display: flex;
+    justify-content: space-between; padding: 0 20px; z-index: 5;
+  }
+  #s4-controls button { font-size: 22px; width: 58px; height: 58px; border-radius: 50%; padding: 0; background: rgba(255,255,255,0.85); }
+
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -254,12 +303,12 @@
     <p class="sub" id="rps-status">یکی رو انتخاب کن</p>
   </div>
 
-  <!-- 7: stage end -->
-  <div id="screen-end" class="screen" hidden>
-    <h1>پایان مرحله ۱</h1>
+  <!-- 7: reusable "end of stage" result screen (used after every stage) -->
+  <div id="screen-stage-result" class="screen" hidden>
+    <h1 id="stage-result-title">پایان مرحله</h1>
     <table class="results" id="results-table"></table>
-    <p class="sub">مراحل بعدی (معدن طلا، مسابقه، دنیای رویایی) به‌زودی اضافه می‌شن</p>
-    <button id="btn-restart">اتاق جدید</button>
+    <p class="sub" id="stage-result-note">مرحله بعد به‌زودی شروع می‌شه…</p>
+    <button id="btn-restart" hidden>بازی جدید</button>
   </div>
 
   <!-- 8: leaderboard -->
@@ -269,10 +318,59 @@
     <button id="btn-leaderboard-back" class="secondary">بازگشت</button>
   </div>
 
+  <!-- 9: stage 2 - gold mining -->
+  <div id="screen-stage2" class="screen" hidden style="padding:8px; justify-content:flex-start;">
+    <div id="hud">
+      <div class="score me" id="s2-score">امتیاز: 0</div>
+      <div id="s2-timer">۴۰</div>
+    </div>
+    <p class="sub" style="margin-top:44px;">💎 الماس ۷۰ | 🟡 طلا ۳۰ | 🗑️ آشغال ۵ | 🐍 مار ۲۰-</p>
+    <div id="stage2-grid"></div>
+  </div>
+
+  <!-- 10: stage 3 - racing -->
+  <div id="screen-stage3" class="screen" hidden style="padding:0; justify-content:flex-start;">
+    <div id="hud">
+      <div class="score me" id="s3-status">آماده…</div>
+      <div id="s3-progress">۰٪</div>
+    </div>
+    <div id="stage3-track">
+      <div class="s3-lane-line" style="left:33.33%"></div>
+      <div class="s3-lane-line" style="left:66.66%"></div>
+      <div id="s3-finish-line"></div>
+      <div id="s3-me" class="s3-car">🚗</div>
+      <div id="s3-opp" class="s3-car opp">🚙</div>
+    </div>
+    <div id="s3-controls">
+      <button id="s3-left">⬅️</button>
+      <button id="s3-bump" hidden>💥 بزنش!</button>
+      <button id="s3-right">➡️</button>
+    </div>
+  </div>
+
+  <!-- 11: stage 4 - dreamland climb -->
+  <div id="screen-stage4" class="screen" hidden style="padding:0; justify-content:flex-start;">
+    <div id="hud">
+      <div class="score me" id="s4-score">امتیاز: 0</div>
+      <div id="s4-timer">۴۵</div>
+    </div>
+    <div id="stage4-sky">
+      <div class="s4-lane-line" style="left:33.33%"></div>
+      <div class="s4-lane-line" style="left:66.66%"></div>
+      <div id="s4-bubble">🫧</div>
+    </div>
+    <div id="s4-controls">
+      <button id="s4-left">⬅️</button>
+      <button id="s4-mid">⬆️</button>
+      <button id="s4-right">➡️</button>
+    </div>
+  </div>
+
   <div id="toast"></div>
 </div>
 
 <script>
+
 (function () {
   'use strict';
 
@@ -307,13 +405,31 @@
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms || 1800);
   }
 
+  // A stable identity for this browser tab that survives a socket reconnect
+  // (locked screen, backgrounded app, flaky network). Kept in sessionStorage
+  // too, so an accidental page refresh mid-game can still reconnect.
+  function getOrCreatePlayerId() {
+    try {
+      let id = sessionStorage.getItem('chaseGamePlayerId');
+      if (!id) {
+        id = 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        sessionStorage.setItem('chaseGamePlayerId', id);
+      }
+      return id;
+    } catch (e) {
+      return 'p_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+  }
+  const myPlayerId = getOrCreatePlayerId();
+
   // ---------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------
   let myName = '';
-  let myId = null;
+  let myId = myPlayerId; // used throughout to match against server-side player keys
   let roomCode = null;
   let myChar = null;
+  let hasEnteredGame = false; // true once we've created/joined a room at least once
   let myPos = { x: 50, y: 50 };     // percentage coordinates (0-100) inside the field
   let oppPos = { x: 50, y: 50 };
   let moving = false;
@@ -324,18 +440,62 @@
   // 0/1: connect + name
   // ---------------------------------------------------------------------
   socket.on('connect', () => {
-    myId = socket.id;
+    if (hasEnteredGame && roomCode) {
+      // This is a reconnect mid-game, not a fresh visit — rejoin silently.
+      socket.emit('rejoin', { code: roomCode, playerId: myPlayerId });
+      return;
+    }
     show('screen-name');
+  });
+
+  socket.on('resync', (state) => {
+    toast('دوباره وصل شدی ✅', 1500);
+    document.getElementById('hud-my-score') && (document.getElementById('hud-my-score').textContent = 'شما: ' + (state.scores[myId] || 0));
+    if (state.stage === 1) {
+      myChar = state.characters[myId];
+      const oppId = Object.keys(state.characters).find((id) => id !== myId);
+      meTokenEl.innerHTML = avatarHTML(myChar, myName);
+      oppTokenEl.innerHTML = avatarHTML(state.characters[oppId] || 'man', state.names[oppId] || 'حریف');
+      myPos = { x: 30, y: 70 };
+      oppPos = { x: 70, y: 30 };
+      placeToken(meTokenEl, myPos);
+      placeToken(oppTokenEl, oppPos);
+      show('screen-arena');
+      lastFrame = performance.now();
+      requestAnimationFrame(gameLoop);
+    } else if (state.stage === 2) {
+      startStage2();
+    } else if (state.stage === 3) {
+      startStage3(state.trackSeed);
+    } else if (state.stage === 4) {
+      startStage4();
+    } else if (Object.keys(state.characters || {}).length < 2) {
+      show('screen-select');
+    }
+  });
+
+  socket.on('rejoin_failed', () => {
+    toast('اتاق دیگه وجود نداره، از اول شروع کن', 2500);
+    setTimeout(() => window.location.reload(), 2000);
+  });
+
+  socket.on('opponent_connection_issue', () => {
+    toast('اتصال حریف قطع شد… منتظر می‌مونیم', 3000);
+  });
+
+  socket.on('opponent_reconnected', () => {
+    toast('حریف دوباره وصل شد ✅', 1800);
   });
 
   document.getElementById('name-continue').addEventListener('click', () => {
     const val = document.getElementById('name-input').value.trim();
     myName = val || 'بازیکن';
+    hasEnteredGame = true;
     // Telegram deep-link auto-join: /startapp=<code>
     const startParam = tg && tg.initDataUnsafe ? tg.initDataUnsafe.start_param : null;
     if (startParam) {
       roomCode = startParam.toUpperCase();
-      socket.emit('join_room', { code: roomCode, name: myName });
+      socket.emit('join_room', { code: roomCode, name: myName, playerId: myPlayerId });
       show('screen-waiting-join');
       document.getElementById('room-code-display').textContent = roomCode;
       document.getElementById('btn-share').hidden = true;
@@ -348,14 +508,14 @@
   // 2/3: lobby
   // ---------------------------------------------------------------------
   document.getElementById('btn-create').addEventListener('click', () => {
-    socket.emit('create_room', { name: myName });
+    socket.emit('create_room', { name: myName, playerId: myPlayerId });
   });
 
   document.getElementById('btn-join').addEventListener('click', () => {
     const code = document.getElementById('join-code-input').value.trim().toUpperCase();
     if (!code) return;
     roomCode = code;
-    socket.emit('join_room', { code, name: myName });
+    socket.emit('join_room', { code, name: myName, playerId: myPlayerId });
   });
 
   document.getElementById('btn-leaderboard').addEventListener('click', () => {
@@ -581,11 +741,10 @@
   });
 
   // ---------------------------------------------------------------------
-  // 7: stage end
+  // Reusable "end of stage" screen
   // ---------------------------------------------------------------------
-  socket.on('stage_end', ({ scores, names }) => {
-    const ids = Object.keys(scores);
-    const rows = ids
+  function renderScoreRows(scores, names) {
+    return Object.keys(scores)
       .sort((a, b) => scores[b] - scores[a])
       .map((id, i) => {
         const isMe = id === myId;
@@ -593,9 +752,15 @@
         return `<tr><td>${crown}${names[id]}${isMe ? ' (شما)' : ''}</td><td>${scores[id]}</td></tr>`;
       })
       .join('');
-    document.getElementById('results-table').innerHTML = rows;
-    show('screen-end');
-  });
+  }
+
+  function showStageResult(title, note, scores, names, isFinal) {
+    document.getElementById('stage-result-title').textContent = title;
+    document.getElementById('stage-result-note').textContent = note;
+    document.getElementById('results-table').innerHTML = renderScoreRows(scores, names);
+    document.getElementById('btn-restart').hidden = !isFinal;
+    show('screen-stage-result');
+  }
 
   document.getElementById('btn-restart').addEventListener('click', () => window.location.reload());
 
@@ -604,8 +769,379 @@
     setTimeout(() => window.location.reload(), 2000);
   });
 
+  socket.on('stage1_end', ({ scores, names }) => {
+    showStageResult('پایان مرحله ۱: تعقیب و سیلی', 'مرحله بعد: معدن طلا ⛏️', scores, names, false);
+  });
+
   // ---------------------------------------------------------------------
-  // 8: leaderboard
+  // Stage 2: gold mining
+  // ---------------------------------------------------------------------
+  let stage2Score = 0;
+  let stage2Timer = null;
+  let stage2Submitted = false;
+
+  const S2_TYPES = [
+    { type: 'snake', weight: 0.08, icon: '🐍', points: -20 },
+    { type: 'diamond', weight: 0.12, icon: '💎', points: 70 },
+    { type: 'gold', weight: 0.35, icon: '🟡', points: 30 },
+    { type: 'trash', weight: 0.45, icon: '🗑️', points: 5 }
+  ];
+  function pickS2Type() {
+    const r = Math.random();
+    let acc = 0;
+    for (const t of S2_TYPES) {
+      acc += t.weight;
+      if (r <= acc) return t;
+    }
+    return S2_TYPES[S2_TYPES.length - 1];
+  }
+
+  function startStage2() {
+    stage2Score = 0;
+    stage2Submitted = false;
+    document.getElementById('s2-score').textContent = 'امتیاز: 0';
+    const grid = document.getElementById('stage2-grid');
+    grid.innerHTML = '';
+    for (let i = 0; i < 35; i++) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.dataset.dug = '0';
+      grid.appendChild(tile);
+      tile.addEventListener('click', () => digTile(tile));
+    }
+    show('screen-stage2');
+
+    let timeLeft = 40;
+    document.getElementById('s2-timer').textContent = timeLeft;
+    clearInterval(stage2Timer);
+    stage2Timer = setInterval(() => {
+      timeLeft -= 1;
+      document.getElementById('s2-timer').textContent = timeLeft;
+      if (timeLeft <= 0) {
+        clearInterval(stage2Timer);
+        finishStage2();
+      }
+    }, 1000);
+  }
+
+  function digTile(tile) {
+    if (tile.dataset.dug === '1' || stage2Submitted) return;
+    tile.dataset.dug = '1';
+    const t = pickS2Type();
+    tile.textContent = t.icon;
+    tile.classList.add('dug', 'pop');
+    stage2Score += t.points;
+    document.getElementById('s2-score').textContent = 'امتیاز: ' + stage2Score;
+    haptic(t.points < 0 ? 'error' : 'light');
+  }
+
+  function finishStage2() {
+    if (stage2Submitted) return;
+    stage2Submitted = true;
+    document.querySelectorAll('#stage2-grid .tile').forEach((t) => (t.style.pointerEvents = 'none'));
+    socket.emit('stage2_result', { score: stage2Score });
+    toast('زمان تموم شد! منتظر حریف…', 2500);
+  }
+
+  socket.on('stage2_start', () => startStage2());
+
+  socket.on('stage2_end', ({ scores, names }) => {
+    showStageResult('پایان مرحله ۲: معدن طلا', 'مرحله بعد: مسابقه ماشین 🏁', scores, names, false);
+  });
+
+  // ---------------------------------------------------------------------
+  // Stage 3: racing
+  // ---------------------------------------------------------------------
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  let s3 = null; // race state
+
+  function startStage3(trackSeed) {
+    const rand = mulberry32(trackSeed || Date.now());
+    const obstacles = [];
+    let p = 12;
+    const icons = ['🪨', '🚧', '🛢️'];
+    while (p < 92) {
+      obstacles.push({
+        progress: p,
+        lane: Math.floor(rand() * 3) - 1,
+        icon: icons[Math.floor(rand() * icons.length)],
+        hit: false,
+        el: null
+      });
+      p += 6 + rand() * 6;
+    }
+
+    s3 = {
+      progress: 0,
+      lane: 0,
+      speed: 14, // progress units per second
+      slowUntil: 0,
+      finished: false,
+      oppProgress: 0,
+      oppLane: 0,
+      obstacles,
+      lastSent: 0,
+      lastFrame: performance.now()
+    };
+
+    const track = document.getElementById('stage3-track');
+    track.querySelectorAll('.s3-obstacle').forEach((el) => el.remove());
+    obstacles.forEach((o) => {
+      const el = document.createElement('div');
+      el.className = 's3-obstacle';
+      el.style.cssText = 'position:absolute;font-size:26px;transform:translate(-50%,-50%);';
+      el.textContent = o.icon;
+      track.appendChild(el);
+      o.el = el;
+    });
+
+    document.getElementById('s3-status').textContent = 'برو!';
+    show('screen-stage3');
+    requestAnimationFrame(stage3Loop);
+  }
+
+  function laneToX(lane) { return 50 + lane * 25; } // percent
+
+  function stage3Loop(now) {
+    if (!s3 || screens['screen-stage3'].hidden) return;
+    const dt = Math.min((now - s3.lastFrame) / 1000, 0.1);
+    s3.lastFrame = now;
+
+    if (!s3.finished) {
+      const speedMult = now < s3.slowUntil ? 0.4 : 1;
+      s3.progress = Math.min(100, s3.progress + s3.speed * speedMult * dt);
+
+      s3.obstacles.forEach((o) => {
+        if (!o.hit && o.lane === s3.lane && Math.abs(o.progress - s3.progress) < 1.5) {
+          o.hit = true;
+          s3.slowUntil = now + 1200;
+          toast('برخورد کردی! 💥', 1200);
+          haptic('error');
+        }
+      });
+
+      if (s3.progress >= 100) {
+        s3.finished = true;
+        document.getElementById('s3-status').textContent = 'رسیدی! منتظر حریف…';
+        socket.emit('stage3_finish');
+      }
+
+      if (now - s3.lastSent > 90) {
+        socket.emit('stage3_progress', { progress: s3.progress, lane: s3.lane });
+        s3.lastSent = now;
+      }
+    }
+
+    // render
+    const VIEW = 30; // progress units visible ahead of the player
+    const trackEl = document.getElementById('stage3-track');
+    const h = trackEl.clientHeight;
+    function progressToY(prog) {
+      const rel = prog - s3.progress; // 0 = at player, VIEW = far ahead (top)
+      return h * 0.82 - (rel / VIEW) * h * 0.75;
+    }
+
+    s3.obstacles.forEach((o) => {
+      const y = progressToY(o.progress);
+      o.el.style.top = y + 'px';
+      o.el.style.left = laneToX(o.lane) + '%';
+      o.el.style.opacity = o.hit ? '0.25' : '1';
+    });
+
+    const finishEl = document.getElementById('s3-finish-line');
+    finishEl.style.top = progressToY(100) + 'px';
+
+    const meEl = document.getElementById('s3-me');
+    meEl.style.left = laneToX(s3.lane) + '%';
+    meEl.style.top = (h * 0.82) + 'px';
+
+    const oppEl = document.getElementById('s3-opp');
+    oppEl.style.left = laneToX(s3.oppLane) + '%';
+    oppEl.style.top = progressToY(s3.oppProgress) + 'px';
+
+    document.getElementById('s3-progress').textContent = Math.floor(s3.progress) + '٪';
+
+    const bumpBtn = document.getElementById('s3-bump');
+    bumpBtn.hidden = s3.finished || Math.abs(s3.oppProgress - s3.progress) > 4 || s3.oppLane !== s3.lane;
+
+    requestAnimationFrame(stage3Loop);
+  }
+
+  document.getElementById('s3-left').addEventListener('click', () => {
+    if (s3 && !s3.finished) s3.lane = Math.max(-1, s3.lane - 1);
+  });
+  document.getElementById('s3-right').addEventListener('click', () => {
+    if (s3 && !s3.finished) s3.lane = Math.min(1, s3.lane + 1);
+  });
+  document.getElementById('s3-bump').addEventListener('click', () => {
+    socket.emit('stage3_bump');
+    haptic('medium');
+  });
+
+  socket.on('opponent_stage3_progress', ({ progress, lane }) => {
+    if (!s3) return;
+    s3.oppProgress = progress;
+    s3.oppLane = lane;
+  });
+
+  socket.on('you_got_bumped', ({ slowMs }) => {
+    if (!s3) return;
+    s3.slowUntil = performance.now() + slowMs;
+    toast('حریف بهت زد! 💢', 1200);
+    haptic('warning');
+  });
+
+  socket.on('stage3_winner', ({ winner }) => {
+    if (winner === myId) toast('اول رسیدی! +۱۰۰ امتیاز 🏆', 2000);
+    else toast('حریف زودتر رسید 😅', 2000);
+  });
+
+  socket.on('stage3_start', ({ trackSeed }) => startStage3(trackSeed));
+
+  socket.on('stage3_end', ({ scores, names }) => {
+    s3 = null;
+    showStageResult('پایان مرحله ۳: مسابقه', 'مرحله بعد: دنیای رویایی 🍬', scores, names, false);
+  });
+
+  // ---------------------------------------------------------------------
+  // Stage 4: dreamland climb
+  // ---------------------------------------------------------------------
+  let s4 = null;
+
+  function startStage4() {
+    const sky = document.getElementById('stage4-sky');
+    sky.querySelectorAll('.s4-hazard, .s4-gem, .s4-row-label').forEach((el) => el.remove());
+
+    s4 = {
+      lane: 0,
+      startTime: performance.now(),
+      elapsed: 0,
+      score: 0,
+      alive: true,
+      submitted: false,
+      rows: [], // {height, laneHazard: -1|0|1|null, gemLane: -1|0|1|null, passed:false, hazardEl, gemEl}
+      nextRowHeight: 14
+    };
+
+    document.getElementById('s4-score').textContent = 'امتیاز: 0';
+    show('screen-stage4');
+
+    let timeLeft = 45;
+    document.getElementById('s4-timer').textContent = timeLeft;
+    clearInterval(s4.timer);
+    s4.timer = setInterval(() => {
+      timeLeft -= 1;
+      document.getElementById('s4-timer').textContent = Math.max(0, timeLeft);
+      if (timeLeft <= 0) endStage4();
+    }, 1000);
+
+    requestAnimationFrame(stage4Loop);
+  }
+
+  const S4_HAZARDS = ['📍', '🐦', '⚫'];
+  function maybeSpawnRow(heightNow) {
+    while (s4.nextRowHeight < heightNow + 40) {
+      const h = s4.nextRowHeight;
+      s4.nextRowHeight += 8 + Math.random() * 4;
+      const hasHazard = Math.random() < 0.55;
+      const hazardLane = hasHazard ? Math.floor(Math.random() * 3) - 1 : null;
+      let gemLane = null;
+      if (Math.random() < 0.3) {
+        do { gemLane = Math.floor(Math.random() * 3) - 1; } while (gemLane === hazardLane);
+      }
+      const row = { height: h, hazardLane, gemLane, passed: false, hazardEl: null, gemEl: null };
+      if (hazardLane !== null) {
+        const el = document.createElement('div');
+        el.className = 's4-hazard';
+        el.textContent = S4_HAZARDS[Math.floor(Math.random() * S4_HAZARDS.length)];
+        document.getElementById('stage4-sky').appendChild(el);
+        row.hazardEl = el;
+      }
+      if (gemLane !== null) {
+        const el = document.createElement('div');
+        el.className = 's4-gem';
+        el.textContent = '💎';
+        document.getElementById('stage4-sky').appendChild(el);
+        row.gemEl = el;
+      }
+      s4.rows.push(row);
+    }
+  }
+
+  function stage4Loop(now) {
+    if (!s4 || screens['screen-stage4'].hidden) return;
+    if (s4.alive) {
+      s4.elapsed = (now - s4.startTime) / 1000;
+      const heightNow = s4.elapsed * 9; // climb speed
+      maybeSpawnRow(heightNow);
+      s4.score = Math.floor(s4.elapsed * 10);
+      document.getElementById('s4-score').textContent = 'امتیاز: ' + s4.score;
+
+      const sky = document.getElementById('stage4-sky');
+      const skyH = sky.clientHeight;
+      const bubble = document.getElementById('s4-bubble');
+      bubble.style.left = laneToX(s4.lane) + '%';
+
+      s4.rows.forEach((row) => {
+        const relH = row.height - heightNow; // 0 = at bubble, positive = above
+        const y = skyH * 0.75 - relH * (skyH * 0.75 / 26);
+        if (row.hazardEl) { row.hazardEl.style.top = y + 'px'; row.hazardEl.style.left = laneToX(row.hazardLane) + '%'; }
+        if (row.gemEl) { row.gemEl.style.top = y + 'px'; row.gemEl.style.left = laneToX(row.gemLane) + '%'; }
+
+        if (!row.passed && relH < 1 && relH > -1) {
+          row.passed = true;
+          if (row.hazardLane === s4.lane) {
+            haptic('error');
+            toast('خوردی به موانع! 😖', 1800);
+            s4.alive = false;
+            if (row.hazardEl) row.hazardEl.style.opacity = '0.3';
+            endStage4();
+          } else if (row.gemLane === s4.lane) {
+            s4.score += 15;
+            haptic('light');
+            if (row.gemEl) row.gemEl.remove();
+          }
+        }
+      });
+    }
+    requestAnimationFrame(stage4Loop);
+  }
+
+  function moveS4Lane(dir) {
+    if (!s4 || !s4.alive) return;
+    s4.lane = Math.max(-1, Math.min(1, s4.lane + dir));
+  }
+  document.getElementById('s4-left').addEventListener('click', () => moveS4Lane(-1));
+  document.getElementById('s4-right').addEventListener('click', () => moveS4Lane(1));
+  document.getElementById('s4-mid').addEventListener('click', () => {}); // reserved
+
+  function endStage4() {
+    if (!s4 || s4.submitted) return;
+    s4.submitted = true;
+    s4.alive = false;
+    clearInterval(s4.timer);
+    document.getElementById('s4-score').textContent = 'امتیاز نهایی: ' + s4.score;
+    toast('منتظر حریف…', 2000);
+    socket.emit('stage4_result', { score: s4.score });
+  }
+
+  socket.on('stage4_start', () => startStage4());
+
+  socket.on('game_over', ({ scores, names }) => {
+    s4 = null;
+    showStageResult('🏁 پایان بازی 🏁', 'برای شروع دوباره یه اتاق جدید بساز', scores, names, true);
+  });
+
+  // ---------------------------------------------------------------------
+  // Leaderboard
   // ---------------------------------------------------------------------
   socket.on('leaderboard', (list) => {
     const el = document.getElementById('leaderboard-list');
