@@ -1,8 +1,11 @@
 // ============================================================================
-// Chase Game Server — Stage 1 (chase + rock-paper-scissors slap duel)
+// Chase Game Server — full 4-stage flow, with reconnect tolerance
 // ----------------------------------------------------------------------------
-// Serves the client (public/index.html) AND runs the real-time game logic
-// over Socket.io, so a single deployment (one URL) is all you need.
+// Players are identified by a persistent `playerId` generated once in the
+// client (not by socket.id, which changes on every reconnect). If a socket
+// drops — a locked phone, backgrounding the app to open the Telegram share
+// sheet, a flaky network — we give it a grace window to reconnect and
+// "rejoin" before we tell the room the player actually left.
 // ============================================================================
 
 const express = require('express');
@@ -12,22 +15,32 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  cors: { origin: '*' },
+  pingInterval: 20000,
+  pingTimeout: 40000 // tolerate a backgrounded WebView for a while before Socket.io gives up
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---- Tunable game numbers -------------------------------------------------
 const CONFIG = {
-  ROUND_TIME_SEC: 90,      // length of stage 1, in seconds
-  SLAP_PENALTY: 50,        // points lost when caught & slapped
-  ESCAPE_REWARD: 30,       // points gained when you escape the slap (adjust freely)
-  DUEL_COOLDOWN_MS: 2000,  // grace period after a duel before another can start
-  RPS_TIME_MS: 4000,       // time each player has to pick rock/paper/scissors
-  MAX_TIE_RETRIES: 3       // how many times a rock/paper/scissors tie re-rolls
+  ROUND_TIME_SEC: 90,
+  SLAP_PENALTY: 50,
+  ESCAPE_REWARD: 30,
+  DUEL_COOLDOWN_MS: 2000,
+  RPS_TIME_MS: 4000,
+  MAX_TIE_RETRIES: 3,
+  STAGE_TRANSITION_MS: 3000,
+  STAGE3_BUMP_SLOW_MS: 1200,
+  STAGE3_BUMP_COOLDOWN_MS: 1500,
+  STAGE3_FINISH_GRACE_SEC: 20,
+  RACE_WIN_POINTS: 100,
+  RECONNECT_GRACE_MS: 25000 // how long a dropped player has to come back
 };
 
-const rooms = Object.create(null);   // roomCode -> room state
-const leaderboard = [];              // { name, opponent, score, result, at }
+const rooms = Object.create(null);
+const leaderboard = [];
 
 function makeRoomCode() {
   let code;
@@ -37,8 +50,13 @@ function makeRoomCode() {
   return code;
 }
 
-function otherPlayer(room, socketId) {
-  return room.players.find((id) => id !== socketId);
+function otherPlayer(room, playerId) {
+  return room.players.find((id) => id !== playerId);
+}
+
+function emitToPlayer(room, playerId, event, payload) {
+  const sid = room.socketOf[playerId];
+  if (sid) io.to(sid).emit(event, payload);
 }
 
 function beats(a, b) {
@@ -49,49 +67,94 @@ function beats(a, b) {
   );
 }
 
+function currentStateSnapshot(room) {
+  return {
+    stage: room.stage,
+    scores: room.scores,
+    names: room.names,
+    characters: room.characters,
+    timeLeft: room.timeLeft,
+    trackSeed: room.trackSeed || null
+  };
+}
+
 io.on('connection', (socket) => {
   // --- Lobby: create / join -------------------------------------------------
-  socket.on('create_room', ({ name }) => {
+  socket.on('create_room', ({ name, playerId }) => {
+    if (!playerId) return;
     const code = makeRoomCode();
     rooms[code] = {
       code,
-      players: [socket.id],
-      names: { [socket.id]: name || 'بازیکن ۱' },
+      stage: 0,
+      players: [playerId],
+      socketOf: { [playerId]: socket.id },
+      disconnectTimers: {},
+      names: { [playerId]: name || 'بازیکن ۱' },
       characters: {},
-      scores: { [socket.id]: 0 },
+      scores: { [playerId]: 0 },
       positions: {},
       duel: null,
       cooldownUntil: 0,
       timer: null,
       timeLeft: CONFIG.ROUND_TIME_SEC,
-      started: false
+      started: false,
+      bumpCooldown: {}
     };
     socket.join(code);
     socket.data.room = code;
+    socket.data.playerId = playerId;
     socket.emit('room_created', { code });
   });
 
-  socket.on('join_room', ({ code, name }) => {
+  socket.on('join_room', ({ code, name, playerId }) => {
+    if (!playerId) return;
     const room = rooms[(code || '').toUpperCase()];
     if (!room) return socket.emit('error_msg', { message: 'کد اتاق پیدا نشد.' });
+    if (room.players.includes(playerId)) {
+      // Same browser session re-submitting join (e.g. double tap) — treat as rejoin.
+      return handleRejoin(socket, room.code, playerId);
+    }
     if (room.players.length >= 2) return socket.emit('error_msg', { message: 'این اتاق پره.' });
 
-    room.players.push(socket.id);
-    room.scores[socket.id] = 0;
-    room.names[socket.id] = name || 'بازیکن ۲';
+    room.players.push(playerId);
+    room.socketOf[playerId] = socket.id;
+    room.scores[playerId] = 0;
+    room.names[playerId] = name || 'بازیکن ۲';
     socket.join(room.code);
     socket.data.room = room.code;
+    socket.data.playerId = playerId;
 
-    io.to(room.code).emit('room_ready', {
-      names: room.names
-    });
+    io.to(room.code).emit('room_ready', { names: room.names });
   });
+
+  // --- Reconnect: same tab lost its socket and got a new one ---------------
+  socket.on('rejoin', ({ code, playerId }) => handleRejoin(socket, code, playerId));
+
+  function handleRejoin(sock, code, playerId) {
+    const room = rooms[(code || '').toUpperCase()];
+    if (!room || !playerId || !room.players.includes(playerId)) {
+      sock.emit('rejoin_failed');
+      return;
+    }
+    clearTimeout(room.disconnectTimers[playerId]);
+    delete room.disconnectTimers[playerId];
+
+    room.socketOf[playerId] = sock.id;
+    sock.join(room.code);
+    sock.data.room = room.code;
+    sock.data.playerId = playerId;
+
+    sock.emit('resync', currentStateSnapshot(room));
+    const opp = otherPlayer(room, playerId);
+    if (opp) emitToPlayer(room, opp, 'opponent_reconnected', {});
+  }
 
   // --- Character selection ---------------------------------------------------
   socket.on('select_character', ({ character }) => {
     const room = rooms[socket.data.room];
-    if (!room) return;
-    room.characters[socket.id] = character; // 'man' | 'woman'
+    const playerId = socket.data.playerId;
+    if (!room || !playerId) return;
+    room.characters[playerId] = character; // 'man' | 'woman'
     io.to(room.code).emit('character_update', { characters: room.characters });
 
     if (
@@ -99,31 +162,32 @@ io.on('connection', (socket) => {
       Object.keys(room.characters).length === 2 &&
       !room.started
     ) {
-      startRound(room.code);
+      startStage1(room.code);
     }
   });
 
-  // --- Movement sync -----------------------------------------------------
+  // === STAGE 1: chase + slap duel ==========================================
   socket.on('move', (pos) => {
     const room = rooms[socket.data.room];
-    if (!room || !room.started) return;
-    room.positions[socket.id] = pos;
-    const opp = otherPlayer(room, socket.id);
-    if (opp) io.to(opp).emit('opponent_move', pos);
+    const playerId = socket.data.playerId;
+    if (!room || !playerId || room.stage !== 1) return;
+    room.positions[playerId] = pos;
+    const opp = otherPlayer(room, playerId);
+    if (opp) emitToPlayer(room, opp, 'opponent_move', pos);
   });
 
-  // --- Catch attempt -> starts a duel -------------------------------------
   socket.on('catch_attempt', () => {
     const room = rooms[socket.data.room];
-    if (!room || !room.started || room.duel) return;
+    const playerId = socket.data.playerId;
+    if (!room || !playerId || room.stage !== 1 || room.duel) return;
     if (Date.now() < room.cooldownUntil) return;
 
-    const opp = otherPlayer(room, socket.id);
+    const opp = otherPlayer(room, playerId);
     if (!opp) return;
 
-    room.duel = { catcher: socket.id, target: opp, choices: {}, tries: 0, timeout: null };
+    room.duel = { catcher: playerId, target: opp, choices: {}, tries: 0, timeout: null };
     io.to(room.code).emit('duel_start', {
-      catcher: socket.id,
+      catcher: playerId,
       target: opp,
       timeMs: CONFIG.RPS_TIME_MS
     });
@@ -132,32 +196,116 @@ io.on('connection', (socket) => {
 
   socket.on('rps_choice', ({ choice }) => {
     const room = rooms[socket.data.room];
-    if (!room || !room.duel) return;
-    if (![room.duel.catcher, room.duel.target].includes(socket.id)) return;
+    const playerId = socket.data.playerId;
+    if (!room || !room.duel || !playerId) return;
+    if (![room.duel.catcher, room.duel.target].includes(playerId)) return;
 
-    room.duel.choices[socket.id] = choice;
+    room.duel.choices[playerId] = choice;
     if (Object.keys(room.duel.choices).length === 2) {
       clearTimeout(room.duel.timeout);
       resolveDuel(room.code);
     }
   });
 
+  // === STAGE 2: gold mining (client-scored) ===============================
+  socket.on('stage2_result', ({ score }) => {
+    const room = rooms[socket.data.room];
+    const playerId = socket.data.playerId;
+    if (!room || !playerId || room.stage !== 2) return;
+    room.scores[playerId] = (room.scores[playerId] || 0) + (Number(score) || 0);
+    room.stage2Reported.add(playerId);
+    if (room.stage2Reported.size === room.players.length) {
+      advanceToStage3(room.code);
+    }
+  });
+
+  // === STAGE 3: racing =====================================================
+  socket.on('stage3_progress', (pos) => {
+    const room = rooms[socket.data.room];
+    const playerId = socket.data.playerId;
+    if (!room || !playerId || room.stage !== 3) return;
+    const opp = otherPlayer(room, playerId);
+    if (opp) emitToPlayer(room, opp, 'opponent_stage3_progress', pos);
+  });
+
+  socket.on('stage3_bump', () => {
+    const room = rooms[socket.data.room];
+    const playerId = socket.data.playerId;
+    if (!room || !playerId || room.stage !== 3) return;
+    const now = Date.now();
+    if (room.bumpCooldown[playerId] && now < room.bumpCooldown[playerId]) return;
+    room.bumpCooldown[playerId] = now + CONFIG.STAGE3_BUMP_COOLDOWN_MS;
+    const opp = otherPlayer(room, playerId);
+    if (opp) emitToPlayer(room, opp, 'you_got_bumped', { slowMs: CONFIG.STAGE3_BUMP_SLOW_MS });
+  });
+
+  socket.on('stage3_finish', () => {
+    const room = rooms[socket.data.room];
+    const playerId = socket.data.playerId;
+    if (!room || !playerId || room.stage !== 3) return;
+    if (room.stage3Finished.has(playerId)) return;
+    room.stage3Finished.add(playerId);
+
+    if (room.stage3Finished.size === 1) {
+      room.scores[playerId] = (room.scores[playerId] || 0) + CONFIG.RACE_WIN_POINTS;
+      io.to(room.code).emit('stage3_winner', { winner: playerId, scores: room.scores });
+    }
+
+    if (room.stage3Finished.size === room.players.length) {
+      advanceToStage4(room.code);
+    } else {
+      clearTimeout(room.stage3Grace);
+      room.stage3Grace = setTimeout(
+        () => advanceToStage4(room.code),
+        CONFIG.STAGE3_FINISH_GRACE_SEC * 1000
+      );
+    }
+  });
+
+  // === STAGE 4: dreamland climb (client-scored) ===========================
+  socket.on('stage4_result', ({ score }) => {
+    const room = rooms[socket.data.room];
+    const playerId = socket.data.playerId;
+    if (!room || !playerId || room.stage !== 4) return;
+    room.scores[playerId] = (room.scores[playerId] || 0) + (Number(score) || 0);
+    room.stage4Reported.add(playerId);
+    if (room.stage4Reported.size === room.players.length) {
+      finishGame(room.code);
+    }
+  });
+
+  // --- Leaderboard ----------------------------------------------------------
   socket.on('get_leaderboard', () => {
     socket.emit('leaderboard', leaderboard.slice(-20).reverse());
   });
 
+  // --- Disconnect: grace period before we treat the player as truly gone ---
   socket.on('disconnect', () => {
     const room = rooms[socket.data.room];
-    if (!room) return;
-    io.to(room.code).emit('opponent_left');
-    clearInterval(room.timer);
-    if (room.duel) clearTimeout(room.duel.timeout);
-    delete rooms[room.code];
+    const playerId = socket.data.playerId;
+    if (!room || !playerId) return;
+    if (room.socketOf[playerId] !== socket.id) return; // a newer socket already took over
+
+    delete room.socketOf[playerId];
+    const opp = otherPlayer(room, playerId);
+    if (opp) emitToPlayer(room, opp, 'opponent_connection_issue', {});
+
+    room.disconnectTimers[playerId] = setTimeout(() => {
+      io.to(room.code).emit('opponent_left');
+      clearInterval(room.timer);
+      clearTimeout(room.stage3Grace);
+      if (room.duel) clearTimeout(room.duel.timeout);
+      delete rooms[room.code];
+    }, CONFIG.RECONNECT_GRACE_MS);
   });
 });
 
-function startRound(code) {
+// ============================================================================
+// Stage logic
+// ============================================================================
+function startStage1(code) {
   const room = rooms[code];
+  room.stage = 1;
   room.started = true;
   room.timeLeft = CONFIG.ROUND_TIME_SEC;
 
@@ -168,7 +316,7 @@ function startRound(code) {
     io.to(code).emit('time_update', { timeLeft: room.timeLeft, scores: room.scores });
     if (room.timeLeft <= 0) {
       clearInterval(room.timer);
-      endRound(code);
+      endStage1(code);
     }
   }, 1000);
 }
@@ -182,7 +330,7 @@ function resolveDuel(code) {
   const cChoice = choices[catcher] || options[Math.floor(Math.random() * 3)];
   const tChoice = choices[target] || options[Math.floor(Math.random() * 3)];
 
-  let result; // 'catcher' | 'target' | 'tie'
+  let result;
   if (cChoice === tChoice) {
     room.duel.tries += 1;
     if (room.duel.tries < CONFIG.MAX_TIE_RETRIES) {
@@ -193,9 +341,9 @@ function resolveDuel(code) {
     }
     result = 'tie';
   } else if (beats(cChoice, tChoice)) {
-    result = 'catcher'; // catcher wins -> slaps target
+    result = 'catcher';
   } else {
-    result = 'target'; // target escaped
+    result = 'target';
   }
 
   if (result === 'catcher') {
@@ -216,10 +364,54 @@ function resolveDuel(code) {
   room.duel = null;
 }
 
-function endRound(code) {
+function endStage1(code) {
   const room = rooms[code];
   if (!room) return;
+  room.stage = 0;
+  io.to(code).emit('stage1_end', { scores: room.scores, names: room.names });
+  setTimeout(() => startStage2(code), CONFIG.STAGE_TRANSITION_MS);
+}
 
+function startStage2(code) {
+  const room = rooms[code];
+  if (!room) return;
+  room.stage = 2;
+  room.stage2Reported = new Set();
+  io.to(code).emit('stage2_start', {});
+}
+
+function advanceToStage3(code) {
+  const room = rooms[code];
+  if (!room || room.stage !== 2) return;
+  room.stage = 0;
+  io.to(code).emit('stage2_end', { scores: room.scores, names: room.names });
+  const trackSeed = Math.floor(Math.random() * 1e9);
+  room.trackSeed = trackSeed;
+  setTimeout(() => {
+    if (!rooms[code]) return;
+    room.stage = 3;
+    room.stage3Finished = new Set();
+    io.to(code).emit('stage3_start', { trackSeed, scores: room.scores });
+  }, CONFIG.STAGE_TRANSITION_MS);
+}
+
+function advanceToStage4(code) {
+  const room = rooms[code];
+  if (!room || room.stage === 4 || room.stage === 0) return;
+  clearTimeout(room.stage3Grace);
+  room.stage = 0;
+  io.to(code).emit('stage3_end', { scores: room.scores, names: room.names });
+  setTimeout(() => {
+    if (!rooms[code]) return;
+    room.stage = 4;
+    room.stage4Reported = new Set();
+    io.to(code).emit('stage4_start', {});
+  }, CONFIG.STAGE_TRANSITION_MS);
+}
+
+function finishGame(code) {
+  const room = rooms[code];
+  if (!room) return;
   const [p1, p2] = room.players;
   leaderboard.push({
     p1Name: room.names[p1],
@@ -228,8 +420,7 @@ function endRound(code) {
     p2Score: room.scores[p2],
     at: Date.now()
   });
-
-  io.to(code).emit('stage_end', { scores: room.scores, names: room.names });
+  io.to(code).emit('game_over', { scores: room.scores, names: room.names });
 }
 
 const PORT = process.env.PORT || 3000;
