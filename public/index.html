@@ -120,7 +120,7 @@
   #timer { font-size: 20px; }
 
   #arena-field {
-    position: absolute; inset: 0; background:
+    position: absolute; inset: 0; touch-action: none; background:
       repeating-linear-gradient(0deg, #251742, #251742 40px, #2b1b4c 40px, #2b1b4c 41px),
       repeating-linear-gradient(90deg, #251742, #251742 40px, #2b1b4c 40px, #2b1b4c 41px);
   }
@@ -439,17 +439,25 @@
     placeToken(oppTokenEl, oppPos);
 
     show('screen-arena');
+    lastFrame = performance.now();
     requestAnimationFrame(gameLoop);
   });
 
-  // Tap-to-move: tap anywhere in the field and the character walks there
-  fieldEl.addEventListener('pointerdown', (e) => {
+  // Tap-to-move: tap anywhere in the field and the character walks there.
+  // Bound to several event types since WebViews (Telegram's included) can
+  // differ in which ones they fire reliably.
+  function handleFieldTap(e) {
+    e.preventDefault();
+    const point = e.touches && e.touches.length ? e.touches[0] : e;
     const rect = fieldEl.getBoundingClientRect();
     moveTarget = {
-      x: ((e.clientX - rect.left) / rect.width) * 100,
-      y: ((e.clientY - rect.top) / rect.height) * 100
+      x: Math.max(0, Math.min(100, ((point.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((point.clientY - rect.top) / rect.height) * 100))
     };
-  });
+  }
+  fieldEl.addEventListener('pointerdown', handleFieldTap);
+  fieldEl.addEventListener('touchstart', handleFieldTap, { passive: false });
+  fieldEl.addEventListener('mousedown', handleFieldTap);
 
   let lastFrame = performance.now();
   let lastSent = 0;
@@ -477,8 +485,12 @@
       lastSent = now;
     }
 
-    const dist = Math.hypot(myPos.x - oppPos.x, myPos.y - oppPos.y);
-    catchBtn.hidden = dist > 14 || duelActive;
+    const rect = fieldEl.getBoundingClientRect();
+    const pxDist = Math.hypot(
+      ((myPos.x - oppPos.x) / 100) * rect.width,
+      ((myPos.y - oppPos.y) / 100) * rect.height
+    );
+    catchBtn.hidden = pxDist > 90 || duelActive; // 90px catch radius
 
     requestAnimationFrame(gameLoop);
   }
