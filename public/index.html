@@ -281,7 +281,10 @@
   <div id="screen-arena" class="screen" hidden style="padding:0; justify-content:flex-start;">
     <div id="hud">
       <div class="score me" id="hud-my-score">شما: 0</div>
-      <div id="timer">۹۰</div>
+      <div style="text-align:center;">
+        <div id="timer">۹۰</div>
+        <div class="sub" id="round-indicator" style="font-size:11px;">دست ۰ از ۳</div>
+      </div>
       <div class="score opp" id="hud-opp-score">حریف: 0</div>
     </div>
     <div id="arena-field">
@@ -448,7 +451,17 @@
     show('screen-name');
   });
 
+  socket.on('disconnect', () => {
+    if (hasEnteredGame) return; // mid-game drops are handled by the reconnect/opponent_* flow
+    toast('اتصال به سرور قطع شد، در حال تلاش دوباره…', 2500);
+  });
+
+  socket.on('connect_error', () => {
+    toast('اتصال به سرور برقرار نشد، دوباره امتحان کن', 2500);
+  });
+
   socket.on('resync', (state) => {
+    disarmStageWatchdog();
     toast('دوباره وصل شدی ✅', 1500);
     document.getElementById('hud-my-score') && (document.getElementById('hud-my-score').textContent = 'شما: ' + (state.scores[myId] || 0));
     if (state.stage === 1) {
@@ -507,15 +520,34 @@
   // ---------------------------------------------------------------------
   // 2/3: lobby
   // ---------------------------------------------------------------------
-  document.getElementById('btn-create').addEventListener('click', () => {
-    socket.emit('create_room', { name: myName, playerId: myPlayerId });
+  // Guard against a click landing before the socket has actually finished
+  // connecting (or right after a drop): show clear feedback instead of doing
+  // nothing, and always leave the button usable again afterwards.
+  function guardedEmit(button, eventName, payload, ackEvents) {
+    if (!socket.connected) {
+      toast('در حال اتصال به سرور… چند لحظه صبر کن و دوباره بزن', 2200);
+      return;
+    }
+    button.disabled = true;
+    const reEnable = () => { button.disabled = false; };
+    const timeout = setTimeout(() => {
+      reEnable();
+      toast('سرور جواب نداد، دوباره امتحان کن', 2200);
+    }, 6000);
+    const cleanup = () => { clearTimeout(timeout); reEnable(); };
+    ackEvents.forEach((evt) => socket.once(evt, cleanup));
+    socket.emit(eventName, payload);
+  }
+
+  document.getElementById('btn-create').addEventListener('click', function () {
+    guardedEmit(this, 'create_room', { name: myName, playerId: myPlayerId }, ['room_created', 'error_msg']);
   });
 
-  document.getElementById('btn-join').addEventListener('click', () => {
+  document.getElementById('btn-join').addEventListener('click', function () {
     const code = document.getElementById('join-code-input').value.trim().toUpperCase();
-    if (!code) return;
+    if (!code) { toast('اول کد اتاق رو بنویس', 1800); return; }
     roomCode = code;
-    socket.emit('join_room', { code, name: myName, playerId: myPlayerId });
+    guardedEmit(this, 'join_room', { code, name: myName, playerId: myPlayerId }, ['room_ready', 'error_msg']);
   });
 
   document.getElementById('btn-leaderboard').addEventListener('click', () => {
@@ -597,6 +629,7 @@
     oppPos = { x: 70, y: 30 };
     placeToken(meTokenEl, myPos);
     placeToken(oppTokenEl, oppPos);
+    document.getElementById('round-indicator').textContent = 'دست ۰ از ۳';
 
     show('screen-arena');
     lastFrame = performance.now();
@@ -710,9 +743,13 @@
     document.querySelectorAll('.rps-btn').forEach((b) => b.classList.remove('chosen'));
   });
 
-  socket.on('duel_result', ({ result, catcher, target, scores }) => {
+  socket.on('duel_result', ({ result, catcher, target, scores, duelsPlayed, maxDuels }) => {
     duelActive = false;
     show('screen-arena');
+
+    if (typeof duelsPlayed === 'number') {
+      document.getElementById('round-indicator').textContent = `دست ${duelsPlayed} از ${maxDuels}`;
+    }
 
     const iAmTarget = target === myId;
     const iAmCatcher = catcher === myId;
@@ -754,12 +791,29 @@
       .join('');
   }
 
+  // If we're sitting on the "stage ended" screen and the next stage never
+  // actually starts (e.g. a broadcast was missed during a brief connection
+  // hiccup right at the transition moment), ask the server where we
+  // actually are instead of staying stuck forever.
+  let stageWatchdog = null;
+  function armStageWatchdog() {
+    clearInterval(stageWatchdog);
+    stageWatchdog = setInterval(() => {
+      if (roomCode) socket.emit('rejoin', { code: roomCode, playerId: myPlayerId });
+    }, 6000);
+  }
+  function disarmStageWatchdog() {
+    clearInterval(stageWatchdog);
+  }
+
   function showStageResult(title, note, scores, names, isFinal) {
     document.getElementById('stage-result-title').textContent = title;
     document.getElementById('stage-result-note').textContent = note;
     document.getElementById('results-table').innerHTML = renderScoreRows(scores, names);
     document.getElementById('btn-restart').hidden = !isFinal;
     show('screen-stage-result');
+    if (isFinal) disarmStageWatchdog();
+    else armStageWatchdog();
   }
 
   document.getElementById('btn-restart').addEventListener('click', () => window.location.reload());
@@ -843,7 +897,7 @@
     toast('زمان تموم شد! منتظر حریف…', 2500);
   }
 
-  socket.on('stage2_start', () => startStage2());
+  socket.on('stage2_start', () => { disarmStageWatchdog(); startStage2(); });
 
   socket.on('stage2_end', ({ scores, names }) => {
     showStageResult('پایان مرحله ۲: معدن طلا', 'مرحله بعد: مسابقه ماشین 🏁', scores, names, false);
@@ -1004,7 +1058,7 @@
     else toast('حریف زودتر رسید 😅', 2000);
   });
 
-  socket.on('stage3_start', ({ trackSeed }) => startStage3(trackSeed));
+  socket.on('stage3_start', ({ trackSeed }) => { disarmStageWatchdog(); startStage3(trackSeed); });
 
   socket.on('stage3_end', ({ scores, names }) => {
     s3 = null;
@@ -1133,7 +1187,7 @@
     socket.emit('stage4_result', { score: s4.score });
   }
 
-  socket.on('stage4_start', () => startStage4());
+  socket.on('stage4_start', () => { disarmStageWatchdog(); startStage4(); });
 
   socket.on('game_over', ({ scores, names }) => {
     s4 = null;
