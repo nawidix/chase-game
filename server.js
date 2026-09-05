@@ -31,6 +31,7 @@ const CONFIG = {
   DUEL_COOLDOWN_MS: 2000,
   RPS_TIME_MS: 4000,
   MAX_TIE_RETRIES: 3,
+  STAGE1_MAX_DUELS: 3, // stage 1 ends immediately once this many duels have been resolved
   STAGE_TRANSITION_MS: 3000,
   STAGE3_BUMP_SLOW_MS: 1200,
   STAGE3_BUMP_COOLDOWN_MS: 1500,
@@ -94,6 +95,7 @@ io.on('connection', (socket) => {
       scores: { [playerId]: 0 },
       positions: {},
       duel: null,
+      duelCount: 0,
       cooldownUntil: 0,
       timer: null,
       timeLeft: CONFIG.ROUND_TIME_SEC,
@@ -353,20 +355,29 @@ function resolveDuel(code) {
   }
 
   room.cooldownUntil = Date.now() + CONFIG.DUEL_COOLDOWN_MS;
+  room.duelCount = (room.duelCount || 0) + 1;
   io.to(code).emit('duel_result', {
     result,
     catcher,
     target,
     catcherChoice: cChoice,
     targetChoice: tChoice,
-    scores: room.scores
+    scores: room.scores,
+    duelsPlayed: room.duelCount,
+    maxDuels: CONFIG.STAGE1_MAX_DUELS
   });
   room.duel = null;
+
+  if (room.stage === 1 && room.duelCount >= CONFIG.STAGE1_MAX_DUELS) {
+    clearInterval(room.timer);
+    endStage1(code);
+  }
 }
 
 function endStage1(code) {
   const room = rooms[code];
-  if (!room) return;
+  if (!room || room.stage !== 1) return;
+  clearInterval(room.timer);
   room.stage = 0;
   io.to(code).emit('stage1_end', { scores: room.scores, names: room.names });
   setTimeout(() => startStage2(code), CONFIG.STAGE_TRANSITION_MS);
